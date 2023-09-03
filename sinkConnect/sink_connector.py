@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from jsonCreate import json_create
 from unify import unify_start
+from model import gprtm_models as gprtm
 load_dotenv()
 
 db_name = os.environ['DB_NAME']
@@ -68,8 +69,6 @@ with open(f'{log_dir}/log.txt', 'w', encoding='utf-8') as f:
         #insert, update
         if message.value['payload']['op'] == 'c' or  message.value['payload']['op'] == 'u':
             
-            
-
             if data['error_tf'] : continue
 
             if data['lv1_tf']:
@@ -80,8 +79,21 @@ with open(f'{log_dir}/log.txt', 'w', encoding='utf-8') as f:
                                 continue
                             else:
                                 if json_create(session):
+                                    # link_customer_log 호출 후 task_dml_tp, asis_uuid, tobe_uuid 할당
+                                    result = session.query(gprtm.Link_customer_log).\
+                                                    filter(gprtm.Link_customer_log.task_seq == gprtm.Task_manager.seq,
+                                                        gprtm.Task_manager.seq == seq).\
+                                                    first()
                                     # 통합 함수 호출
-                                    unify_start(session, seq)
+                                    if unify_start(session, seq, result.task_dml_tp, result.asis_uuid, result.tobe_uuid):
+                                        # 성공 로그
+                                        f.write(f'{schema_nm}.{table_nm} Link -> Unify Success\n')
+                                        print(f'{schema_nm}.{table_nm} Link -> Unify 성공')
+                                        # task_manager unify_tf = True
+                                    else:
+                                        f.write(f'{schema_nm}.{table_nm} Link -> Unify Fail\n')
+                                        print(f'{schema_nm}.{table_nm} Link -> Unify 실패')
+                                        # task_manager unify_tf = False
                                 else:
                                     continue
                                 
