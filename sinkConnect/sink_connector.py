@@ -1,8 +1,10 @@
 import threading
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, TopicPartition
+from kafka.structs import OffsetAndMetadata
 import ssl
 import os
 import json
+import time
 import psycopg2
 import os
 from sqlalchemy import create_engine
@@ -28,6 +30,7 @@ log_dir = f'{os.path.dirname(os.path.realpath(__file__))}/log'
 next_num = 0
 engine = create_engine(f'postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}', pool_size=15, max_overflow=20)
 Session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
+topic = 'brave_connector_78540.gprtm.task_manager'
 
 def sink_connect_setting():
     
@@ -37,7 +40,7 @@ def sink_connect_setting():
     bootstrap_servers = ['ec2-13-114-158-85.ap-northeast-1.compute.amazonaws.com:9096',
                     'ec2-52-68-247-26.ap-northeast-1.compute.amazonaws.com:9096',
                     'ec2-54-64-83-210.ap-northeast-1.compute.amazonaws.com:9096']
-    topic_name = 'brave_connector_78540.gprtm.task_manager'
+    topic_name = topic
     group_id = 'python-cluster'
     dir = os.path.dirname(os.path.realpath(__file__))
     ssl_cafile = f'{dir}/ssl/KAFKA_TRUSTED_CERT.pem'
@@ -59,8 +62,11 @@ def sink_connect_setting():
         bootstrap_servers=bootstrap_servers,
         security_protocol='SSL',
         ssl_context=ssl_context,
-        max_poll_interval_ms=3000000,
+        session_timeout_ms=60000,
+        heartbeat_interval_ms=20000,
+        max_poll_interval_ms=50000,
         max_poll_records=10,
+        retry_backoff_ms=1000,
         value_deserializer=lambda x: json.loads(x.decode('utf-8')) if x is not None else None
     )
 
@@ -68,7 +74,8 @@ def sink_connect_setting():
 
     return session, consumer
 
-def excpetion_log(f, message):
+def exception_log(f, message):
+    print(str(message))
     f.write(str(message))
     f.flush()
 
@@ -93,7 +100,7 @@ def job_log(f, schema_nm, table_nm, task_seq, job_func, message, t_name, process
     
 #     session.commit()
 
-def unified_job(f, session, schema_nm, table_nm, job, task_seq, t_name, check, start_time):
+def unified_job(f, session, schema_nm, table_nm, job, task_seq, t_name, check, check_cnt ,start_time):
     # print(f'{job} start!')
     # task_record 가 있을 경우에만 로직 진행
     task_record = session.query(gprtm.Task_manager).filter(gprtm.Task_manager.seq == task_seq).first()
@@ -103,13 +110,22 @@ def unified_job(f, session, schema_nm, table_nm, job, task_seq, t_name, check, s
     
     # 중복된 메세지가 들어올 경우 처리
     # getattr(task_record,job) != data[job_list[i]] 로 현재 메시지 데이터(중복된 데이터)와 DB상에 존재하는 데이터의 상태가 상이할 경우
-    if getattr(task_record, job) != check: return
+    # DB 상에 존재하는 error_retry_cnt 가 메시지의 error_retry_cnt 보다 더 클 경우(이미 실패한 메시지임)
+    if (getattr(task_record, job) != check) or (getattr(task_record, 'error_retry_cnt') is not None and check_cnt is not None and getattr(task_record, 'error_retry_cnt') > check_cnt):
+        # print(f'{getattr(task_record, job)}, {check}')
+        return
     
     tf = True
     # L2
     if job == 'lv2_tf':
     # L1 정제 함수 호출
-        tf = level_function(session,task_seq,2,schema_nm,table_nm)
+        if level_function(session,task_seq,2,schema_nm,table_nm):
+            task_record.lv2_tf = True
+            if task_record.error_tf:
+                task_record.error_tf = False
+                task_record.error_retry_cnt = 0
+        
+        tf = task_record.lv2_tf
 
         end_time = datetime.now()
         job_log(f, schema_nm, table_nm, task_seq, tf, 'Unfiy -> L2',t_name, end_time-start_time)
@@ -135,6 +151,9 @@ def unified_job(f, session, schema_nm, table_nm, job, task_seq, t_name, check, s
 
             end_time = datetime.now()
             job_log(f, schema_nm, table_nm, task_seq, tf, 'Link -> Unify',t_name, end_time-start_time)
+
+        else:
+            tf = False
     
     # Link job
     elif job == 'link_tf':
@@ -207,9 +226,16 @@ def sink_connect_start():
             # print(message)
             # cnt+=1
             # print(f'{cnt} 시도')
+            # topic_partition = TopicPartition(topic, message.partition)
+            # meta = consumer.partitions_for_topic(topic)
+            # offsets = OffsetAndMetadata(message.offset+1, meta)
+            # options = {}
+            # options[topic_partition] = offsets
+            # consumer.commit(offsets=options)
             # continue
             try:
-                if message.value is None or message.value['payload']['after'] is None: continue
+                if message.value is None or message.value['payload']['after'] is None: 
+                    continue
                 
                 data = message.value['payload']['after']
                 schema_nm = data['lv0_schema_nm']
@@ -230,19 +256,33 @@ def sink_connect_start():
                     
                     for i in table_tp_dic[table_tp]:
                         if (data[job_list[i]] is not None) and (not data[job_list[i]]):
-                            unified_job(f, session, schema_nm, table_nm, job_list[i], task_seq, t_name, data[job_list[i]], start_time)
+                            unified_job(f, session, schema_nm, table_nm, job_list[i], task_seq, t_name, data[job_list[i]], data['error_retry_cnt'], start_time)
                             break
-                    
+
                 #delete
                 else :
-                    continue
                     # print(f"Delete : {message.value['payload']['before']}")
-                    # print()
-                consumer.commit()
+                    continue
             except Exception as e:
-                excpetion_log(f, e)
+                exception_log(f, e)
+
+            finally:
+                try:
+                    topic_partition = TopicPartition(topic, message.partition)
+                    meta = consumer.partitions_for_topic(topic)
+                    offsets = OffsetAndMetadata(message.offset+1, meta)
+                    options = {}
+                    options[topic_partition] = offsets
+                    # print(offsets)
+                    session.commit()
+                    consumer.commit(offsets=options)
+                except Exception as e:
+                    exception_log(f,e)
+                    # 파티션 리밸런싱 대기
+                    time.sleep(5)
+                
         # Consumer 종료
-    consumer.close()
+        consumer.close()
 
 def make_threads(start, end):
     thread_li = []
@@ -259,7 +299,7 @@ def start_threads(thread_li):
 def main():
     global next_num
     next_num = 32
-    thread_li = make_threads(0,30)
+    thread_li = make_threads(0,32)
     start_threads(thread_li)
 
 if __name__ == "__main__":
