@@ -27,7 +27,8 @@ def make_unify_upsert_data(record):
         'cust_gender_tp' : record.cust_gender_tp,
         'cust_marketing' : record.cust_marketing,
         'register_dt' : record.register_dt,
-        'modify_dt' : record.modify_dt
+        'modify_dt' : record.modify_dt,
+        'cust_hc_sfid' : record.cust_hc_sfid
     }
 
     return upsert_data
@@ -281,4 +282,5 @@ def unify_start(session, seq, task_dml_tp, asis_uuid, tobe_uuid, effected_uuids,
     
     except Exception as e:
         print(f'task_record {seq} 통합 과정 에러 발생 {e}')
+        session.rollback()
         return False
