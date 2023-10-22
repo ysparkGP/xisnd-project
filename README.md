@@ -73,5 +73,21 @@
 
         <img width="674" alt="스크린샷 2023-10-22 15 45 39" src="https://github.com/ysparkGP/xisnd-project/assets/64354998/377c8693-190c-4c18-aa10-c0b298b74138">
 
+        토픽 이름, 파티션, 오프셋을 제외한 다른 값들은 변경사항이 있으면 안되는데, 이상하게도 serialized_value_size가 -1 에서 4로 변한 것을 확인함
+        '''
+        producer = KafkaProducer(
+            acks=1,
+            compression_type='gzip',
+            bootstrap_servers=bootstrap_servers,
+            security_protocol='SSL',
+            ssl_context=ssl_context,
+            # linger_ms=1000,
+            value_serializer=lambda x: dumps(x).encode('utf-8') if x is not None else None,
+            retries=3
+            # value_serializer=None
+        )
+        '''
+        kafkaProducer에서 NULL 을 None으로 변경할 때, utf-8 인코딩 형식으로 변경하여 직렬화된 value size가 4바이트로 변경되었다고 추측함.
+        그래서 명시적으로 serialized_value_size 를 -1로 변경하여 다시 DELETE 테스트를 해보니 제대로 삭제 처리가 이루어짐
         
 
