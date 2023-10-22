@@ -30,7 +30,8 @@ log_dir = f'{os.path.dirname(os.path.realpath(__file__))}/log'
 next_num = 0
 engine = create_engine(f'postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}', pool_size=15, max_overflow=20)
 Session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
-topic = 'brave_connector_78540.gprtm.task_manager'
+# topic = 'brave_connector_78540.gprtm.task_manager'
+topic = 'affable_connector_18074.gprtm.task_manager'
 
 def sink_connect_setting():
     
@@ -62,9 +63,9 @@ def sink_connect_setting():
         bootstrap_servers=bootstrap_servers,
         security_protocol='SSL',
         ssl_context=ssl_context,
-        session_timeout_ms=60000,
+        session_timeout_ms=70000,
         heartbeat_interval_ms=20000,
-        max_poll_interval_ms=50000,
+        max_poll_interval_ms=90000,
         max_poll_records=10,
         retry_backoff_ms=1000,
         value_deserializer=lambda x: json.loads(x.decode('utf-8')) if x is not None else None
@@ -100,7 +101,7 @@ def job_log(f, schema_nm, table_nm, task_seq, job_func, message, t_name, process
     
 #     session.commit()
 
-def unified_job(f, session, schema_nm, table_nm, job, task_seq, t_name, check, check_cnt ,start_time):
+def unified_job(f, session, schema_nm, table_nm, table_tp, channel_tp, job, task_seq, t_name, check, check_cnt ,start_time):
     # print(f'{job} start!')
     # task_record 가 있을 경우에만 로직 진행
     task_record = session.query(gprtm.Task_manager).filter(gprtm.Task_manager.seq == task_seq).first()
@@ -115,7 +116,7 @@ def unified_job(f, session, schema_nm, table_nm, job, task_seq, t_name, check, c
         # print(f'{getattr(task_record, job)}, {check}')
         return
     
-    tf = True
+    tf = False
     # L2
     if job == 'lv2_tf':
     # L1 정제 함수 호출
@@ -132,29 +133,56 @@ def unified_job(f, session, schema_nm, table_nm, job, task_seq, t_name, check, c
 
     # Unify job
     elif job == 'unified_tf':
+        
         if json_create(session):
+            if table_tp == 'I':
             # link_customer_log 호출 후 task_dml_tp, asis_uuid, tobe_uuid 할당
-            result = session.query(gprtm.Link_customer_log).\
-                            filter(gprtm.Link_customer_log.task_seq == gprtm.Task_manager.seq,
-                                gprtm.Task_manager.seq == task_seq,
-                                gprtm.Link_customer_log.task_dml_tp != 'CHAIN').\
-                            first()
-            
-            # 통합함수 호출
-            if unify_start(session, task_seq, task_record.dml_tp, result.asis_uuid, result.tobe_uuid, task_record.effected_uuid, task_record.changed_effected_uuid):
-                task_record.unified_tf = True
-                if task_record.error_tf:
-                    task_record.error_tf = False
-                    task_record.error_retry_cnt = 0
-                    
-            tf = task_record.unified_tf
+                result = session.query(gprtm.Link_customer_log).\
+                                filter(gprtm.Link_customer_log.task_seq == gprtm.Task_manager.seq,
+                                    gprtm.Task_manager.seq == task_seq,
+                                    gprtm.Link_customer_log.task_dml_tp != 'CHAIN').\
+                                first()
+                
+                if result is not None:
+                    unify_start(session, task_seq, task_record.dml_tp, result.asis_uuid, result.tobe_uuid, task_record.effected_uuid, task_record.changed_effected_uuid, table_tp)
+                
+            else:
+                # marketing 갱신 작업
+                result = session.query(gprtm.Link_customer).\
+                                filter(gprtm.Marketing_customer.channel_tp == channel_tp,
+                                    gprtm.Marketing_customer.cust_seq == task_record.cust_seq,
+                                    gprtm.Marketing_customer.channel_tp == gprtm.Link_customer.channel_tp,
+                                    gprtm.Marketing_customer.cust_seq == gprtm.Link_customer.cust_seq).\
+                                first()
+                
+                if result is not None:
+                # 통합함수 호출
+                    unify_start(session, task_seq, task_record.dml_tp, None, result.uuid, None, None, table_tp)
 
+                
+                else:
+                    # marketing customer table 또는 link customer table 에 존재하지 않을 경우
+                    unify_record = session.query(gprtm.Unify_customer).\
+                                            filter(gprtm.Link_customer.channel_tp == channel_tp,
+                                                gprtm.Link_customer.cust_seq == task_record.cust_seq,
+                                                gprtm.Unify_customer.uuid == gprtm.Link_customer.uuid).\
+                                            first()
+                    
+                    if unify_record is not None:
+                        unify_record.cust_marketing_tf = None
+                        
+            task_record.unified_tf = True
+            if task_record.error_tf:
+                task_record.error_tf = False
+                task_record.error_retry_cnt = 0
+            tf = task_record.unified_tf
             end_time = datetime.now()
             job_log(f, schema_nm, table_nm, task_seq, tf, 'Link -> Unify',t_name, end_time-start_time)
 
         else:
+            # json create table 에 문제가 생겼을 경우
             tf = False
-    
+
     # Link job
     elif job == 'link_tf':
         # Union -> Link 함수 호출
@@ -217,24 +245,20 @@ def sink_connect_start():
     job_list = ['lv1_tf', 'lv1_external_tf', 'union_tf', 'link_tf', 'unified_tf', 'lv2_tf']
     t_name = threading.current_thread().name
     session, consumer = sink_connect_setting()
-    # cnt = 0
+    cnt = 0
     # 메시지 수신
     with open(f'{log_dir}/{t_name}_log.txt', 'a', encoding='utf-8') as f:
         f.write(f'\n-------------- [{t_name}] START : {datetime.now()} --------------\n')
         for message in consumer:
             start_time = datetime.now()
-            # print(message)
-            # cnt+=1
-            # print(f'{cnt} 시도')
-            # topic_partition = TopicPartition(topic, message.partition)
-            # meta = consumer.partitions_for_topic(topic)
-            # offsets = OffsetAndMetadata(message.offset+1, meta)
-            # options = {}
-            # options[topic_partition] = offsets
-            # consumer.commit(offsets=options)
-            # continue
             try:
-                if message.value is None or message.value['payload']['after'] is None: 
+                # print(message)
+                # cnt+=1
+                # print(f'{cnt} 시도')
+                # continue
+                if message.value is None or message.value['payload']['after'] is None or message.value['payload']['op'] == 'd': 
+                    cnt+=1
+                    print(f'clean : {cnt} 시도')
                     continue
                 
                 data = message.value['payload']['after']
@@ -245,9 +269,11 @@ def sink_connect_start():
                 #insert, update
                 if message.value['payload']['op'] == 'c' or  message.value['payload']['op'] == 'u':
                     # 테이블 작업이 Individual(I), Profile(P), History(H), ETC(E) 중 어디에서 일어나는지 확인 후 어떠한 로직을 태울 것인지 결정 
-                    check_query = f" select table_tp from gprtm.legacy_manager where lv0_schema_nm = '{schema_nm}' and lv0_table_nm = '{table_nm}' "
-                    table_tp = session.execute(check_query).first()['table_tp']
-                    table_tp_dic = {'I': [0, 1, 2, 3, 4, 5], 'H': [0, 1, 5], 'E': [0, 1, 5]}
+                    check_query = f" select table_tp, channel_tp from gprtm.legacy_manager where lv0_schema_nm = '{schema_nm}' and lv0_table_nm = '{table_nm}' "
+                    check_result = session.execute(check_query).first()
+                    table_tp = check_result['table_tp']
+                    channel_tp = check_result['channel_tp']
+                    table_tp_dic = {'I': [0, 1, 2, 3, 4, 5], 'H': [0, 1, 4, 5], 'E': [0, 1, 5]}
                     
                     # 에러 횟수가 5번 초과했는지부터 체크
                     if data['error_retry_cnt'] != None:
@@ -256,13 +282,12 @@ def sink_connect_start():
                     
                     for i in table_tp_dic[table_tp]:
                         if (data[job_list[i]] is not None) and (not data[job_list[i]]):
-                            unified_job(f, session, schema_nm, table_nm, job_list[i], task_seq, t_name, data[job_list[i]], data['error_retry_cnt'], start_time)
+                            unified_job(f, session, schema_nm, table_nm, table_tp, channel_tp, job_list[i], task_seq, t_name, data[job_list[i]], data['error_retry_cnt'], start_time)
                             break
 
-                #delete
                 else :
-                    # print(f"Delete : {message.value['payload']['before']}")
                     continue
+                    # print(f"Delete : {message.value['payload']['before']}")
             except Exception as e:
                 exception_log(f, e)
 
