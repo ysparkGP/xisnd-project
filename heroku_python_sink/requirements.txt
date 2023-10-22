@@ -1,0 +1,5 @@
+kafka-python==2.0.2
+psycopg2==2.9.5
+SQLAlchemy==1.4.44
+python-dotenv==1.0.0
+requests==2.31.0
