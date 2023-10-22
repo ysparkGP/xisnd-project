@@ -20,6 +20,10 @@
 20230821 ~ 20231031(예상 기간)
 
 ## 아키텍쳐
+![architecture](https://github.com/ysparkGP/xisnd-project/assets/64354998/55a4e93a-fea0-4cc3-bff3-4c1a6ced61d6)
+
+## Flowchart
+![flowchart](https://github.com/ysparkGP/xisnd-project/assets/64354998/54472fdc-ddec-4566-8472-10124a58ea65)
 
 ## CDC - Kafka - Unify 상세 흐름 설명
 
