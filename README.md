@@ -63,3 +63,15 @@
         * 업무 요구사항에 다른 채널 회원 데이터들을 통합하여 Service Cloud에 넣는 것과 Service Cloud 에서 생성한 회원 데이터들도 통합하여 다시 Service Cloud 에 넣는 것이 있었기에.. 조금 복잡한 상황
             * 다른 채널(DI, OM) : L0 -> L1 -> Union -> Link -> Unify -> L2 -> HC -> 동기화 -> L0_CX -> L1_CX -> Union -> Link -> Unify -> L2 -> HC
             * CXMS : HC -> 동기화 -> L0_CX -> L1_CX -> Union -> Link -> Unify -> L2 -> HC
+* 202310(2~3) : 2차 통합테스트 기간
+    * 고객의 주민등록번호나 전화번호등 민감한 정보들이 담겨있는 테이블들은 기본적으로 암호화 되어있어서 원천에서 제공해주는 View 데이터들을 들고와아햐는데, CDC 기술 적용을 맡고있는 매니저님이 View에 적용이 어렵다는 답변을 내놓음.
+    * 그래서 테이블에 CDC를 꼽되, Heroku Kafka에서 변경사항 메시지를 받아 어떤 태이블들이 어떤 DML 작업이 일어나는지 확인하고 View 에서 다시 변경 데이터들을 가져와 메시지를 가공하여 L0의 토픽에 다시 push 해주는 작업이 필요했음
+        * 이 역할을 해주는 것이 decrypt_sink_connector.py 인데 INSERT, UPDATE 는 문제가 없었으나, DELETE 과정에서 L0 데이터들이 삭제가 안되는 문제 발생
+        * 원천에서 CDC를 꼽은 테이블들은 DELETE 시, 변경사항 레코드 뿐만 아니라 후에 툼스톤 레코드(메시지)라는 것이 넘어오는데, 이 메시지에는 key값만 존재하고 value는 없는 상태여서 key 값만 복사하고 producer가 토픽에제 전송하였었음.
+        * 삭제가 안되는 원인을 찾다가 원천 CDC의 변경사항 메시지를 받은 KafkaConsumer와 이 메시지를 받고 처리를 하여 다시 L0 CDC가 구독한 토픽에게 전송하는 kafkaProducer 의 툼스톤 메시지를 비교하기로 함
+        <img width="673" alt="스크린샷 2023-10-22 15 45 23" src="https://github.com/ysparkGP/xisnd-project/assets/64354998/ec335cb2-06a2-4a52-9506-37821a31539b">
+
+        <img width="674" alt="스크린샷 2023-10-22 15 45 39" src="https://github.com/ysparkGP/xisnd-project/assets/64354998/377c8693-190c-4c18-aa10-c0b298b74138">
+
+        
+
