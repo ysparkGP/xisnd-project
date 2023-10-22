@@ -10,6 +10,8 @@ def json_create_check(union_table_fields, rule_json):
 
     # result 리스트 요소가 튜플로 되어 있어서 string으로 만들기 위한 작업
     for i in union_table_fields:
+        if i[0] == 'uuid':
+            continue
         all_union_feilds.add(i[0])
 
     for i in rule_json['logic']:
@@ -26,7 +28,7 @@ def json_create(session):
 
     # 테이블 이름
     json_table = 'gprtm.rule_manager' # json 저장하는 테이블
-    union_table = "union_customer" # union 테이블
+    unify_table = "unify_customer" # union 테이블
     # DB 연결
     try:
         
@@ -39,7 +41,7 @@ def json_create(session):
             pg_catalog.pg_class c
             inner join pg_catalog.pg_attribute a on a.attrelid = c.oid
         where
-            c.relname = '{union_table}'
+            c.relname = '{unify_table}'
             and a.attnum > 0
             and a.attisdropped is false
             and a.attname not in ('seq', 'channel_tp', 'cust_seq', 'register_dt', 'modify_dt')
@@ -51,34 +53,36 @@ def json_create(session):
         if not (union_table_fields):
             raise Exception("Union 테이블 조회 실패입니다. 테이블 이름을 확인해주세요.")
         
-        select_rule_manager_qurey = f"SELECT rule_json, default_json FROM {json_table};"
-        select_rule_manager_qurey_result = session.execute(select_rule_manager_qurey).all()[0]
-        rule_json = select_rule_manager_qurey_result[0]
-        default_json = select_rule_manager_qurey_result[1]
+        select_rule_manager_qurey = f"SELECT rule_json, default_json, condition_json FROM {json_table};"
+        json_result = session.execute(select_rule_manager_qurey).all()[0]
+        rule_json = json_result[0] if json_result else {'logic': []}
+        default_json = json_result[1] if json_result else {'condition': [{"Date": "new"},{"Frequency": 1},{"Source": ["DI", "OM", "CX", "CS"]}]}
+        condition_json = json_result[2] if json_result else {}
         
         if (json_create_check(union_table_fields, rule_json)):
             return True
 
         # 리턴 데이터 및 조건 정의
         dictionary_data = {'logic': []}
-        conditions = {'name': [{"Source": ["CX", "CS", "DI"]}, {"Date": "new"}, {"Frquency": 1}],
-                      'num': [{"Source": ["CX", "CS", "DI"]}, {"Date": "new"}, {"Frquency": 1}]}
 
         # 필드들을 반복문을 돌면서 conditions에 조건이 있으면 가져오고 없으면 default_condition으로 저장
         for i in union_table_fields:
+            if i[0] == 'uuid':
+                continue
             field = {"field": i[0]}
-            field['conditions'] = conditions[i] if conditions.get(i) else default_json['condition']
+            field['conditions'] = condition_json[i[0]] if condition_json.get(i[0]) else default_json['condition']
             dictionary_data['logic'].append(field)
 
         
         json_data = json.dumps(dictionary_data)
         json_default_condition = json.dumps(default_json)
+        json_condition = json.dumps(condition_json)
 
         # 로직 논의 필요 현재는 1개의 레코드만 사용하는 방식으로 사용중
         # 로그처럼 밑으로 늘려가는 방식도 사용 가능
         # 만약 json_table에 레코드가 없다면 insert 있으면 update
-        insert_json = f"INSERT INTO {json_table} (seq, rule_json, default_json) VALUES (1, '{json_data}', '{json_default_condition}');"
-        update_json = f"UPDATE {json_table} SET rule_json='{json_data}', default_json='{json_default_condition}';"
+        insert_json = f"INSERT INTO {json_table} (seq, rule_json, default_json, condition_json) VALUES (1, '{json_data}', '{json_default_condition}', '{json_condition}');"
+        update_json = f"UPDATE {json_table} SET rule_json='{json_data}';"
         select_all_json_table = f"SELECT * FROM {json_table};"
 
         tf_result = session.execute(select_all_json_table).all()[0][0]
