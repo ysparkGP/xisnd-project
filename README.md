@@ -89,5 +89,18 @@
         ```
         kafkaProducer에서 NULL 을 None으로 변경할 때, utf-8 인코딩 형식으로 변경하여 직렬화된 value size가 4바이트로 변경되었다고 추측함.
         그래서 명시적으로 serialized_value_size 를 -1로 변경하여 다시 DELETE 테스트를 해보니 제대로 삭제 처리가 이루어짐
-
-
+    * Unify 모델 마케팅 수신 동의 컬럼 로직 변경
+        * Unify 모델에는 고객사 컨설팅이나 마케터가 정해준 룰에 따른 통합 로직을 거쳐 통합되어진 고객들의 각 데이터들에 값을 정하는 Reconciliation 과정이 존재함.
+        * 현재는 채널별, 빈도별, 날짜별로 3가지 우선순위 규칙이 존재(Salesforce CDP Reconciliation Rule 과 흡사)
+        * 날짜별이라 하면, 모든 고객 데이터들을 Union 시킨 Union 테이블의 cust_modify_dt(수정일)컬럼의 오름차순 또는 내림차순으로 결정하는 우선순위 규칙인데, 고객사측에서 마케팅 수신 동의 컬럼 우선순위를 고객 수정일이 아닌 다른 테이블의 데이터를 봐야한다고 함.
+            * 그래서 Marketing Customer 테이블을 만들고 unify.py와 sink_connector.py에 따로 마케팅 로직 처리를 추가하였음
+    * 기존 예외 처리 과정 시, 세션이 블락된 채 로직을 진행하려하니 세션을 다시 사용하지 못하는 결함 처리 완료
+    * 성능 이슈를 보완하기 위해 멀티 쓰레딩 환경에서 통합로직을 거치다 보니, 데이터 일관성에 대한 검증을 하는 시간이 많았음
+        * L0 -> L1 : 각 레코드들을 복사하는 과정이니 문제 없음
+        * L1 -> Union : 각 레코드들을 Union 하는 과정이니 문제 없음
+        * Union -> Link : UPDATE, DELETE 시 통합이 쪼개지는 분할체인 과정에서 고려할 점이 있었음
+            * 이러한 과정은 DB 함수인 func_union_to_link_sub() 가 담당하고 있는데, 안을 들여다 보면 통합이 둘 이상으로 쪼개진다면 기존 uuid를 새 uuid들로 UPDATE 하는 쿼리가 있음. 
+            * 이 쿼리가 멀티 쓰레딩 과정에서 위험한 게, phantom read가 발생하여 제대로 된 분활이 되지 않을 가능성이 있음
+            * 그래서 성능을 조금 떨어뜨리더라도 func_union_to_link() 시작 시, UPDATE나 DELETE 라면 access exclusive lock을 명시적으로 걸어주어 일관성을 확보하는 방안 채택
+        * Link -> Unify : uuid 를 전달받아 Link와 Union 테이블들의 조인 레코드들로 로직 진행하기에 문제 없음
+        * Unify -> L2 : 각 레코드들을 복사하는 과정이니 문제 없음
