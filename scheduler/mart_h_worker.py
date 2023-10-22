@@ -60,5 +60,5 @@ if __name__ == "__main__":
         if current_time >= time(0, 0) and current_time < time(2, 0):
             print(f"{i}('{yesterday_d}')")
             db_dml.executeFunction(f"{i}('{yesterday_d}')")
-
-    
+        db_dml.executeFunction(f"lv2.func_hc_unify_statistics")
+        db_dml.executeFunction(f"lv2.func_lv2_to_hc_unify_statistics")
