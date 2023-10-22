@@ -48,12 +48,13 @@ if __name__ == "__main__":
     #최대 대기 시간
     max_wait_time = 3 * 60 * 60
 
+    db_dml.executeFunction(f"lv2.func_etl_project_master()")
     db_dml.executeFunction(f"lv2.func_hc_apartment_complex()")
     db_dml.executeFunction(f"lv2.func_lv2_to_hc_apartment_complex()")
 
     pendnig_cnt = 1
     while pendnig_cnt != 0:
-        pendnig_cnt = db_dml.readDB('hcsandbox','apartmentcomplex__c','count(*) as cnt','where "_hc_lastop" in (\'PENDING\',\'UPDATED\',\'INSERTED\')')[0][0]
+        pendnig_cnt = db_dml.readDB('hc','apartmentcomplex__c','count(*) as cnt','where "_hc_lastop" in (\'PENDING\',\'UPDATED\',\'INSERTED\')')[0][0]
         print(pendnig_cnt)
         if current_time >= (current_time + max_wait_time):
             break
@@ -67,7 +68,7 @@ if __name__ == "__main__":
 
     pendnig_cnt = 1
     while pendnig_cnt != 0:
-        pendnig_cnt = db_dml.readDB('hcsandbox','apartment__c','count(*) as cnt','where "_hc_lastop" in (\'PENDING\',\'UPDATED\',\'INSERTED\')')[0][0]
+        pendnig_cnt = db_dml.readDB('hc','apartment__c','count(*) as cnt','where "_hc_lastop" in (\'PENDING\',\'UPDATED\',\'INSERTED\')')[0][0]
         print(pendnig_cnt)
         if current_time >= (current_time + max_wait_time):
             break
