@@ -31,6 +31,18 @@ class Task_manager(Base):
     effected_uuid = Column(ARRAY(VARCHAR))
     changed_effected_uuid = Column(ARRAY(VARCHAR))
 
+class Marketing_customer(Base):
+    __tablename__ = 'marketing_customer'
+
+    seq = Column(Integer, primary_key=True)
+    channel_tp = Column(VARCHAR())
+    cust_seq = Column(VARCHAR())
+    cust_marketing_tp = Column(VARCHAR())
+    cust_marketing_tf = Column(BOOLEAN)
+    cust_modify_dt = Column(TIMESTAMP)
+    register_dt = Column(TIMESTAMP)
+    modify_dt = Column(TIMESTAMP)
+
 
 class Union_customer(Base):
 
@@ -49,7 +61,6 @@ class Union_customer(Base):
     cust_register_dt = Column(TIMESTAMP)
     cust_modify_dt = Column(TIMESTAMP)
     cust_gender_tp = Column(VARCHAR())
-    cust_marketing = Column(VARCHAR())
     register_dt = Column(TIMESTAMP)
     modify_dt = Column(TIMESTAMP)
     cust_hc_sfid = Column(VARCHAR())
@@ -82,7 +93,7 @@ class Unify_customer(Base):
     cust_register_dt = Column(TIMESTAMP)
     cust_modify_dt = Column(TIMESTAMP)
     cust_gender_tp = Column(VARCHAR())
-    cust_marketing = Column(VARCHAR())
+    cust_marketing_tf = Column(BOOLEAN)
     register_dt = Column(TIMESTAMP)
     modify_dt = Column(TIMESTAMP)
     cust_hc_sfid = Column(VARCHAR())
@@ -107,3 +118,10 @@ class Link_customer_log(Base):
     tobe_uuid = Column(VARCHAR())
     register_dt = Column(TIMESTAMP)
     modify_dt = Column(TIMESTAMP)
+
+class Test(Base):
+
+    __tablename__ = 'test'
+
+    seq = Column(Integer, primary_key=True)
+    value = Column(VARCHAR())
