@@ -124,3 +124,20 @@ D -- 완료 처리 --> A
             * 그래서 성능을 조금 떨어뜨리더라도 func_union_to_link() 시작 시, UPDATE나 DELETE 라면 access exclusive lock을 명시적으로 걸어주어 일관성을 확보하는 방안 채택
         * Link -> Unify : uuid 를 전달받아 Link와 Union 테이블들의 조인 레코드들로 로직 진행하기에 문제 없음
         * Unify -> L2 : 각 레코드들을 복사하는 과정이니 문제 없음
+* 202310(4) : 컷오프 및 오픈
+    * DI(분양관리), OM(옵션관리), CX(Service Cloud) 회원 데이터를 한 번에 부어 오픈할 준비를 하는 과정 진행
+    * 데이터 검증 작업은 LG CNS 측에서 담당
+    * 실시간에 멀티 쓰레딩 방식으로 트랜잭션을 처리하다보니 생각치도 못한 많은 예외 상황이 발생했었고 많은 고민과 시행착오 끝에 2차 통합테스트도 마무리 잘 지었지만 역시 어떤 변수가 생길지는 모름
+    * 역시나 변수가 생김
+        * 첫 번째는 union -> link 과정에서 일어나는 프로세스가 데이터가 쌓이면 쌓일수록 느려짐
+            * 쿼리 실행계획들을 뜯어보니 func_union_to_link 함수 시작 지점에서 func_return_to_uuid 함수를 호출하는데 이 함수의 시작점인 task_manager와 union_customer를 조인하는 시점에서 심하게 느리다는 것을 발견함
+            * task_manager에 인덱스를 걸고, where 절에 조건 하나를 추가하여 검색범위를 좁혀주니 20초 이상 걸리던 쿼리가 5~7초대로 준 것을 확인함
+        * 두 번째는 HC -> Salesforce Service Cloud 지점인데, 이 지점은 Heroku Connect 가 동기화를 시키는 지점임
+            * Heroku Connect 가 동기화를 순차적으로 몇 초에 몇 십건밖에 동기화를 시키고 있지 못함..
+            * 빠른 속도 아니냐 할 수 있는데, 이 프로젝트는 회원 뿐만 아니라 아파트 정보, 계약 정보, 프로젝트 정보 등 총 백 만건이 넘어가는 레코드들이 Service Cloud 에 실시간으로 동기화가 되어지고 있어서 저 속도로는 컷 오프 마무리 시점까지는 절대 끝내지 못하는 상황임
+            * Heroku connect 동기화 방식을 찾아보니 2개의 알고리즘이 존재하는데, Ordered Algorithm 과 Merged Writes Algorithm 으로 현재 기본 값으로 우리가 사용하고 있는 Ordered Algorithm 을 사용하고 있었음
+            * Heroku devcenter 문서에서 나온 걸 보니, Ordered Algorithm은 Bulk API를 사용하여 대량 INSERT 작업에 적합하고, Merged Writes Algorithm 은 대량 INSERT 가 아닌 작은 단위 레코드들과 변화가 자주 일어나는 레코드들을 INSERT 하는데 적합함. 여기서 대량이라함은 2000건 이상의 레코드라고 명시되어 있음.
+            * Heroku Connect polling(=동기화) 시간은 실시간 업무 요건이다 보니 최소로 줄여 2분으로 설정해놓았음.
+            <img width="1323" alt="image" src="https://github.com/ysparkGP/xisnd-project/assets/64354998/1983c75e-8ae4-4f03-a359-5973637d6b51">
+            * 그럼, 2분안에 2000 건의 이상 레코드가 동기화 큐에 쌓여서 Bulk API가 호출되느냐 라는 질문에 당연히 쌓이지 못한다고 의견을 내놓았고 적은 단위의 레코드들을 처리하는 SOAP API 가 호출된다는 것을 깨달아 Merged Writes Algorithm 으로 변경하였더니, 처리속도가 급격하게 빨라진 것을 확인함.
+    * 그렇게 컷오프를 다른 프로젝트 팀들보다 제일 빨리 끝내고 오픈을 기다림
