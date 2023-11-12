@@ -25,7 +25,23 @@
 ## Flowchart
 ![flowchart](https://github.com/ysparkGP/xisnd-project/assets/64354998/54472fdc-ddec-4566-8472-10124a58ea65)
 
-## CDC - Kafka - Unify 상세 흐름 설명
+## CDC - Kafka - Unify 흐름 설명
+### Legacy -> Data Hub
+```mermaid
+graph LR
+A[원천 데이터 변경] -- Source Connect --> B[Apache Kafka]
+B -- Sink Connect --> D[Heroku Postgres]
+```
+
+### GPRTM 프로세스 트리거
+동기화된 lv0 레코드 하나당 하나의 프로세스로 진행됨<br>
+lv0 -> lv1 -> lv1_external -> union -> link -> unify -> lv2의 과정을 거친 후 완료
+```mermaid
+graph LR
+A[변경 데이터 적용] -- Source Connect --> B[Apache Kafka]
+B -- Sink Connect --> D[GPRTM Python Connector]
+D -- 완료 처리 --> A
+```
 
 ## 개발 단계 용어
 * L0 : 원천(CDC가 적용 된)과 동일한 레벨의 테이블들
